@@ -16,13 +16,15 @@ import {
  *   - The body field `ciphertext` is an opaque, client-encrypted blob. The
  *     encryption key lives ONLY in the URL fragment on the client and is never
  *     sent to the server. We store the ciphertext verbatim and can't read it.
- *   - There is therefore no server-side crypto in this file, by design. Adding
- *     any would break the zero-knowledge guarantee.
+ *   - There is therefore no server-side crypto in this file, by design.
  *
- * Three endpoints:
- *   POST /notes            — auth required; store a ciphertext with a TTL.
- *   GET  /notes/:id        — public; existence probe, does NOT burn.
- *   POST /notes/:id/reveal — public; atomic read-once burn (GETDEL).
+ * Two instances on purpose (do NOT merge them):
+ *   - publicNotesRoutes — read/burn, PUBLIC. A recipient needs only the link
+ *     and the URL-fragment key, not an account.
+ *   - createNotesRoutes — create, AUTHED (authPlugin derives `user`). The
+ *     auth plugin's derive runs for every route in its own instance, so the
+ *     public routes MUST live in a separate instance, mounted first in
+ *     index.ts, exactly like the redirects service's public hot-path route.
  */
 
 /** What we persist per note. The TTL handles expiry; no `expiresAt` stored. */
@@ -43,14 +45,54 @@ const assertValidId = (id: string): void => {
   if (!ID_RE.test(id)) throw new HttpError(404, 'Note not found')
 }
 
-export const notesRoutes = new Elysia({ prefix: '/api/tainik' })
+/*
+ * PUBLIC — existence probe + read-once burn. No auth: the secrecy is the
+ * URL-fragment key, not a session. Mounted before the authed instance so the
+ * auth plugin never touches these routes.
+ */
+export const publicNotesRoutes = new Elysia({ prefix: '/api/tainik' })
 
   /*
-   * POST /api/tainik/notes — create a self-destructing note.
-   *
-   * The only authenticated route: we need an identity to attribute the note
-   * and to enforce the creator's per-plan limits. Reading/burning is public.
+   * GET /api/tainik/notes/:id — existence probe. Deliberately non-destructive:
+   * the recipient's "reveal?" screen calls this, and so do link-preview bots
+   * (chat apps, crawlers) — none of which should burn the note. Boolean only.
    */
+  .get(
+    '/notes/:id',
+    async ({ params: { id } }) => {
+      assertValidId(id)
+      const exists = (await redis.exists(keys.note(id))) === 1
+      return { exists }
+    },
+    { params: t.Object({ id: t.String() }) },
+  )
+
+  /*
+   * POST /api/tainik/notes/:id/reveal — read-once burn.
+   *
+   * GETDEL is atomic: it returns the value and deletes the key in a single
+   * operation. So two concurrent reveals can't both win — exactly one gets the
+   * ciphertext, everyone else gets a 404. This is the self-destruct guarantee.
+   */
+  .post(
+    '/notes/:id/reveal',
+    async ({ params: { id } }) => {
+      assertValidId(id)
+
+      const raw = await redis.getdel(keys.note(id))
+      if (!raw) throw new HttpError(404, 'Note not found or already read')
+
+      const note = JSON.parse(raw) as StoredNote
+      return { ciphertext: note.ciphertext }
+    },
+    { params: t.Object({ id: t.String() }) },
+  )
+
+/*
+ * AUTHED — create. The only route that needs an identity: to attribute the
+ * note and enforce the creator's per-plan limits. `authPlugin` derives `user`.
+ */
+export const createNotesRoutes = new Elysia({ prefix: '/api/tainik' })
   .use(authPlugin)
   .post(
     '/notes',
@@ -59,8 +101,7 @@ export const notesRoutes = new Elysia({ prefix: '/api/tainik' })
 
       /*
        * `ciphertext` is base64. Enforce the plan's size cap against the real
-       * decoded byte length, not the (larger) base64 string length, so the
-       * limit reflects actual stored payload.
+       * decoded byte length, not the (larger) base64 string length.
        */
       const ciphertextBytes = Buffer.from(body.ciphertext, 'base64').length
       assertSize(ciphertextBytes, limits)
@@ -91,41 +132,4 @@ export const notesRoutes = new Elysia({ prefix: '/api/tainik' })
         ttlHours: t.Number({ minimum: 1 }),
       }),
     },
-  )
-
-  /*
-   * GET /api/tainik/notes/:id — existence probe. PUBLIC, and deliberately
-   * non-destructive: the recipient's "reveal?" screen calls this, and so do
-   * link-preview bots (chat apps, crawlers) — none of which should burn the
-   * note. Returns only a boolean, never the ciphertext.
-   */
-  .get(
-    '/notes/:id',
-    async ({ params: { id } }) => {
-      assertValidId(id)
-      const exists = (await redis.exists(keys.note(id))) === 1
-      return { exists }
-    },
-    { params: t.Object({ id: t.String() }) },
-  )
-
-  /*
-   * POST /api/tainik/notes/:id/reveal — read-once burn. PUBLIC.
-   *
-   * GETDEL is atomic: it returns the value and deletes the key in a single
-   * operation. So two concurrent reveals can't both win — exactly one gets the
-   * ciphertext, everyone else gets a 404. This is the self-destruct guarantee.
-   */
-  .post(
-    '/notes/:id/reveal',
-    async ({ params: { id } }) => {
-      assertValidId(id)
-
-      const raw = await redis.getdel(keys.note(id))
-      if (!raw) throw new HttpError(404, 'Note not found or already read')
-
-      const note = JSON.parse(raw) as StoredNote
-      return { ciphertext: note.ciphertext }
-    },
-    { params: t.Object({ id: t.String() }) },
   )

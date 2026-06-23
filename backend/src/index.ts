@@ -2,7 +2,7 @@ import { Elysia } from 'elysia'
 import cors from '@elysiajs/cors'
 import { config } from './config'
 import { connectRedis } from './redis/client'
-import { notesRoutes } from './routes/notes'
+import { publicNotesRoutes, createNotesRoutes } from './routes/notes'
 
 /*
  * Тайник — zero-knowledge self-destructing notes for the fia.li community.
@@ -63,8 +63,10 @@ const app = new Elysia()
     ],
   }))
 
-  /* The notes API (create / probe / reveal). */
-  .use(notesRoutes)
+  /* Notes API. Public read/burn first, then the authed create — order matters:
+     the auth plugin's derive must not reach the public routes. */
+  .use(publicNotesRoutes)
+  .use(createNotesRoutes)
 
   /*
    * Global error handler. Maps known cases to clean responses and, crucially,
