@@ -1,0 +1,28 @@
+{
+  "slug": "tainik",
+  "name": "Тайник",
+  "version": "1.0.0",
+  "capabilities": [
+    {
+      "key": "maxNotesPerDay",
+      "type": "number",
+      "label": "Заметок в день",
+      "description": "Лимит создаваемых заметок в сутки (-1 = безлимит)",
+      "defaultValue": 10
+    },
+    {
+      "key": "maxTtlHours",
+      "type": "number",
+      "label": "Макс. срок жизни (ч)",
+      "description": "Максимальный TTL заметки в часах",
+      "defaultValue": 24
+    },
+    {
+      "key": "maxNoteSizeKb",
+      "type": "number",
+      "label": "Макс. размер (КБ)",
+      "description": "Максимальный размер шифротекста",
+      "defaultValue": 32
+    }
+  ]
+}

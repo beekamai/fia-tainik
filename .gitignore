@@ -1,0 +1,28 @@
+# dependencies (bun install)
+node_modules
+
+# output
+dist
+out
+*.tgz
+
+# Bun
+.bun
+
+# logs
+logs
+*.log
+
+# dotenv — never commit real secrets (keep .env.example)
+.env
+.env.local
+.env.*.local
+
+# caches
+.cache
+*.tsbuildinfo
+
+# editors / OS
+.idea
+.vscode
+.DS_Store
