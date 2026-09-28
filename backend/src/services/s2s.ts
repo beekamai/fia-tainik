@@ -5,8 +5,9 @@ import { config } from '../config'
  * Lightweight service-to-service (S2S) client for HMAC-signed requests to
  * fia.li internal APIs.
  *
- * The signing scheme matches @fia-li/core (internal-auth.ts):
- *   signature = HMAC-SHA256(`${timestamp}:${serviceName}`, secret) → base64url
+ * The signing scheme matches @fia-li/core (internal-auth.ts, serviceSignaturePayload):
+ *   signature = HMAC-SHA256(`${timestamp}:${serviceName}:${METHOD}:${path}${query}`, secret) → base64url
+ * Binding method + path means a captured signature can't be replayed elsewhere.
  *
  * The billing service verifies the signature and the timestamp freshness, so
  * the three headers below are all that's required to authenticate as Тайник.
@@ -15,13 +16,15 @@ import { config } from '../config'
 const hmacSign = (data: string, secret: string): string =>
   createHmac('sha256', secret).update(data).digest('base64url')
 
-const buildS2sHeaders = (): Record<string, string> => {
+const buildS2sHeaders = (method: string, target: string): Record<string, string> => {
   const ts = String(Date.now())
   const { serviceName, secret } = config.s2s
+  /* Normalised exactly like the verifier does: pathname (percent-encoded) + search */
+  const { pathname, search } = new URL(target)
   return {
     'X-Service-Name': serviceName,
     'X-Service-Timestamp': ts,
-    'X-Service-Signature': hmacSign(`${ts}:${serviceName}`, secret),
+    'X-Service-Signature': hmacSign(`${ts}:${serviceName}:${method.toUpperCase()}:${pathname}${search}`, secret),
   }
 }
 
@@ -54,7 +57,7 @@ export const fetchUserServiceLimits = async (
     const res = await fetch(url, {
       method: 'GET',
       headers: {
-        ...buildS2sHeaders(),
+        ...buildS2sHeaders('GET', url),
         Accept: 'application/json',
       },
       signal: AbortSignal.timeout(3_000),
