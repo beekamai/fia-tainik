@@ -163,8 +163,12 @@ GET {BILLING_URL}/internal/user/:userId/services/tainik/limits
 ```
 X-Service-Name:      tainik
 X-Service-Timestamp: <ms>
-X-Service-Signature: base64url(HMAC-SHA256(`${ts}:tainik`, INTERNAL_SECRET))
+X-Service-Signature: base64url(HMAC-SHA256(`${ts}:tainik:GET:/internal/user/<id>/services/tainik/limits`, INTERNAL_SECRET))
 ```
+
+Подпись привязана к методу и пути (`{ts}:{service}:{METHOD}:{path?query}`), так что
+перехваченную подпись нельзя повторить на другом эндпоинте. `tainik` должен быть
+в allowlist `ALLOWED_SERVICES` ядра fia.li (fia-li/system ≥ #12).
 
 Если billing недоступен или у пользователя нет записи плана для Тайника —
 включается безопасный фолбэк `FREE_LIMITS` (`backend/src/services/limits.ts`).
